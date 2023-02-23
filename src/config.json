@@ -1,0 +1,15 @@
+{
+    "device": "",
+    "baudrate": 9600,
+    "barkServer": "https://api.day.app",
+    "barkSecret": "cGqioDx5Yk44mLeu3qpxFP",
+    "wxCropId": "",
+    "wxCorpSecret": "",
+    "wxAgentId": 1000002,
+    "wxUser": "",
+    "email": "2451809588@qq.com",
+    "smtpServer": "http://smtp.weingxing.cn",
+    "smtpPort": 25,
+    "smtpUser": "notify@weingxing.cn",
+    "smtpPassword": "abcdQWER2@1!"
+}
