@@ -14,7 +14,6 @@ const (
 	CMD_CREG      string = "AT+CREG?" // 检测是否注册网络
 	CMD_CGATT     string = "AT+CGATT?"  // 检测是否附着GPRS
 	CMD_CPMS      string = "AT+CPMS?"  // 查询SIM卡短信使用情况
-	CMD_CMGR      string = "AT+CMGR"  // 读取短消息
 	CMD_COPS      string = "AT+COPS?"
 	CMD_GSN       string = "AT+CMD_GSN"  // 查询IMEI
 	CMD_CCID      string = "AT+CCID"  // 查询SIM卡CCID
@@ -24,7 +23,7 @@ const (
 	CMD_CSMP      string = "AT+CSMP=17,71,0,8" //17,167,0,8 17,167,2,25  1.文本模式，2.this， 3.UCS2， 4.手机号Unicode，5.内容，6.0x1A
 	CMD_CMGFZ     string = "AT+CMGF=0"
 	CMD_CMGL_ALL  string = "AT+CMGL=\"REC UNREAD\"" //获取所有未读短信
-	CMD_CMGDA_ALL string = "AT+CMGDA=6"            // 删除所有短信  CMD_CMGDA_ALL string = "AT+CMGD=1,3"            //SIM900A 这个指令为：AT+CMGDA="DEL ALL" 删除已读短信
+	CMD_CMGDA_ALL string = "AT+CMGDA=\"DEL ALL\""            // 删除已读短信
 	CMD_CMGS      string = "AT+CMGS=\""             //发送短信指令 后跟手机号码
 	CMD_ATD       string = "ATD"                    //呼叫号码
 	CMD_ATH       string = "ATH"                    //挂机
