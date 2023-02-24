@@ -2,7 +2,7 @@ package config
 
 type Config struct {
 	Device       string `json:"device"`
-	Baudrate     uint   `json:"baudrate"`
+	BaudRate     uint   `json:"baudrate"`
 	BarkServer   string `json:"barkServer"`
 	BarkSecret   string `json:"barkSecret"`
 	WxCorpid     string `json:"wxCorpId"`

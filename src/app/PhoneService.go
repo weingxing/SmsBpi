@@ -1,93 +1,161 @@
 package app
 
 import (
-	"SmsBpi/utils"
 	"SmsBpi/config"
-	"time"
-	"encoding/hex"
+	"SmsBpi/utils"
+	"fmt"
+	"github.com/jacobsa/go-serial/serial"
+	"io"
+	"log"
 	"strings"
 	"sync"
+	"time"
 )
 
 var wLock sync.Mutex
 
 var taskBus chan utils.PhoneCmd = make(chan utils.PhoneCmd, 100)
 var resultBus chan utils.PhoneCmd = make(chan utils.PhoneCmd, 100)
+var msgBus chan []byte = make(chan []byte, 100)
 
-func listenSms() {
-	// 每间隔5s，向总线发送一条检查未读短信的指令
-	for {
-		wLock.Lock()
-		utils.ListenSms(taskBus)
-		wLock.Unlock()
-		time.Sleep(time.Duration(5) * time.Second)
+var port io.ReadWriteCloser = nil
+
+const BUFFER_SIZE = 1024 * 8
+
+func connDevice(config config.Config) {
+	options := serial.OpenOptions{
+		PortName:        config.Device,
+		BaudRate:        config.BaudRate,
+		DataBits:        8,
+		StopBits:        1,
+		MinimumReadSize: 4,
+	}
+	p, err := serial.Open(options)
+	if err != nil {
+		log.Println(err)
+	}
+	port = p
+}
+
+func close() {
+	if port != nil {
+		port.Close()
 	}
 }
 
-func clearSms() {
-	// 每天清理一次已读短信
+func initlizing() {
+	// 检查SIM卡状态，正常后进行初始化
+	log.Println("Init")
+	wLock.Lock()
+	utils.Initlize(taskBus)
+	wLock.Unlock()
+}
+
+func listenSms(config config.Config) {
+	buffer := make([]byte, BUFFER_SIZE)
 	for {
-		wLock.Lock()
-		utils.CleanSms(taskBus)
-		wLock.Unlock()
-		time.Sleep(time.Duration(24) * time.Hour)
+		port.Read(buffer)
+		// todo handle buffer
+		msg := string(buffer[:])
+		if strings.Contains(msg, "+CMT:") {
+			// 存储短信，Bark
+			// 发送成功 +CMGS: 157
+			log.Println("来短信了")
+			msgBodys := strings.Split(msg, ",")
+			fmt.Println(msgBodys)
+			// log.Println(utils.DecodeUcs2(strings.ReplaceAll(msgBodys[1], "\"", "")))
+			// log.Println()
+			// receiveTime := strings.ReplaceAll("20" + msgBodys[3] + " " + strings.Split(msgBodys[4], "\n")[0], "\"", "")
+			// body := utils.DecodeUcs2(strings.Split(msgBodys[4], "\n")[1])
+			// utils.Bark(receiveTime + "\n" + body, config)
+			// log.Println(utils.DecodeUcs2(b))
+			// log.Println(utils.EncodeUcs2("10685777605074"))
+			// log.Println(b)
+		} else {
+			// 放回结果队列
+			// log.Println(msg)
+			msgBus <- buffer[:]
+		}
 	}
 }
 
 func heartBeat() {
 	// 每10s进行一次信号强度上报
-}
-
-// 处理AT命令执行结果
-func ProcessATcmdResult(result chan utils.PhoneCmd, config *config.Config, token *string) {
 	for {
-		phoneMsg := <-result
-		// 可以在这里对不同指令的处理结果
-		if strings.HasPrefix(string(phoneMsg.ATCmd), utils.CMD_CMGL_ALL) && strings.Contains(phoneMsg.Result, "OK") {
-			msgs := strings.Split(phoneMsg.Result, utils.CMD_LF_CR)
-			for i, m := range msgs {
-				if strings.HasPrefix(m, "+CMGL:") && strings.Contains(m, "UNREAD") {
-					tmp_info := strings.Split(msgs[i], ",\"")
-					src := strings.ReplaceAll(tmp_info[2], "\"", "")
-					src = strings.ReplaceAll(src, ",", "")
-					tmpsrc, _ := hex.DecodeString(src)
-					phonenum, _ := utils.Ucs2ToUtf8(string(tmpsrc))
-					t := strings.Replace(tmp_info[3], "\"", "", -1) //SIM900A 格式应改为：tmp_info[4]
-					if len(phoneMsg.SendMSG) != 0 {
-						phoneMsg.SendMSG += "\n"
-					}
-					phoneMsg.SendMSG += "来源: " + phonenum + " 时间: " + t + "\n"
-					if utils.IsUcs(msgs[i+1]) {
-						dat, _ := hex.DecodeString(msgs[i+1])
-						tmpmsg, _ := utils.Ucs2ToUtf8(string(dat))
-						phoneMsg.SendMSG += tmpmsg
-					} else {
-						phoneMsg.SendMSG += msgs[i+1]
-					}
-				}
-			}
-		}
-		if strings.HasPrefix(string(phoneMsg.ATCmd), utils.CMD_ATD) {
-			if strings.Contains(phoneMsg.Result, "OK") {
-				phoneMsg.SendMSG = "拨打电话成功"
-			} else {
-				phoneMsg.SendMSG = "拨打电话失败"
-			}
-		}
-
-		if strings.HasPrefix(string(phoneMsg.ATCmd), utils.CMD_CMGS) {
-			if strings.Contains(phoneMsg.Result, "ERROR") {
-				phoneMsg.SendMSG = "发送短信失败"
-			} else {
-				phoneMsg.SendMSG = "发送短信成功"
-			}
-		}
+		wLock.Lock()
+		utils.SignalStrength(taskBus)
+		wLock.Unlock()
+		time.Sleep(time.Duration(10) * time.Second)
 	}
 }
 
+// 执行AT命令
+func execATCmd() {
+	for {
+		cmd := <-taskBus
+		// 发送短信，由于是多个指令，需要特殊处理
+		if strings.HasPrefix(string(cmd.ATCmd[:]), utils.CMD_CMGS) {
+			bodys := strings.SplitN(string(cmd.ATCmd[:]), ":::", 2)
+			// 正式发送前的最后一条指令
+			tmpControl := string(bodys[0]) + utils.CMD_LF
+			_, err := port.Write([]byte(tmpControl))
+			if err != nil {
+				log.Fatal(err)
+			}
+			// 发送消息内容和确认发送标志
+			time.Sleep(time.Duration(1) * time.Second)
+			port.Write([]byte(bodys[1]))
+		} else {
+			_, err := port.Write(cmd.ATCmd)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+		resultBus <- cmd
+		// 每次执行一条指令后，等待给定时间
+		time.Sleep(time.Duration(cmd.Delay) * time.Second)
+	}
+}
+
+// 处理AT命令执行结果，指令执行失败时发出通知
+func processATcmdResult(config config.Config) {
+	for {
+		msg := <-msgBus
+		cmd := <-resultBus
+		body := string(msg)
+		if strings.Contains(body, "ERROR") {
+			utils.Bark(string(cmd.ATCmd)+"执行失败", config)
+		} else if strings.Contains(body, "+CSQ") {
+			strength := strings.Split(body, " ")[1]
+			s := strings.Split(strength, "\n")[0]
+			signal := strings.Split(s, ",")[0]
+			log.Println("信号强度: -" + signal + "dBM")
+		} else {
+			log.Println(body)
+		}
+		// todo 判定短信是否发送成功
+		// todo 处理信号强度
+		// todo 处理运营商
+		// todo 处理IMEI
+	}
+}
+
+func SendSmS(phone string, msg string) {
+	wLock.Lock()
+	utils.SendSms(taskBus, phone, msg)
+	wLock.Unlock()
+}
+
 func Run(config config.Config) {
-	go listenSms()
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	connDevice(config)
+	defer close()
+	initlizing()
+	go processATcmdResult(config)
+	go execATCmd()
+	go listenSms(config)
 	go heartBeat()
-	go utils.ExecATCmd(taskBus, resultBus, &config)
-	// go processATcmdResult()
+	SendSmS("10086", "1")
+	wg.Wait()
 }

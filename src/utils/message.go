@@ -11,6 +11,7 @@ import (
 )
 
 func Bark(msg string, cfg config.Config) bool {
+	// 改用POST发送
 	url := fmt.Sprintf("%s/%s/%s", cfg.BarkServer, cfg.BarkSecret, msg)
 	fmt.Println(url)
 	resp, err := http.Get(url)

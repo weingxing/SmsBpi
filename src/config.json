@@ -1,6 +1,6 @@
 {
-    "device": "",
-    "baudrate": 115200,
+    "device": "COM4",
+    "baudRate": 115200,
     "barkServer": "https://api.day.app",
     "barkSecret": "cGqioDx5Yk44mLeu3qpxFP",
     "wxCropId": "",
