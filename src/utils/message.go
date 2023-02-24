@@ -2,6 +2,7 @@ package utils
 
 import (
 	"SmsBpi/config"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -10,11 +11,21 @@ import (
 	"net/smtp"
 )
 
-func Bark(msg string, cfg config.Config) bool {
-	// 改用POST发送
-	url := fmt.Sprintf("%s/%s/%s", cfg.BarkServer, cfg.BarkSecret, msg)
-	fmt.Println(url)
-	resp, err := http.Get(url)
+func Bark(title string, msg string, cfg config.Config) bool {
+	url := fmt.Sprintf("%s/%s", cfg.BarkServer, cfg.BarkSecret)
+	paramMap := map[string]interface{}{}
+	paramMap["title"] = title
+	paramMap["body"] = msg
+	paramJson, _ := json.Marshal(paramMap)
+	param := bytes.NewBuffer([]byte(paramJson))
+	client := &http.Client{}
+	req, err := http.NewRequest("POST", url, param)
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+	req.Header.Add("Content-Type", "application/json; charset=utf-8")
+	resp, err := client.Do(req)
 	if err != nil {
 		log.Fatal(err)
 	}

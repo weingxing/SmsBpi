@@ -3,7 +3,6 @@ package app
 import (
 	"SmsBpi/config"
 	"SmsBpi/utils"
-	"fmt"
 	"github.com/jacobsa/go-serial/serial"
 	"io"
 	"log"
@@ -17,6 +16,7 @@ var wLock sync.Mutex
 var taskBus chan utils.PhoneCmd = make(chan utils.PhoneCmd, 100)
 var resultBus chan utils.PhoneCmd = make(chan utils.PhoneCmd, 100)
 var msgBus chan []byte = make(chan []byte, 100)
+var to string // 短信收信人
 
 var port io.ReadWriteCloser = nil
 
@@ -44,8 +44,28 @@ func close() {
 }
 
 func initlizing() {
+	buf := make([]byte, BUFFER_SIZE)
 	// 检查SIM卡状态，正常后进行初始化
-	log.Println("Init")
+	ready := false
+	for !ready {
+		port.Write([]byte("AT\r\n"))
+		time.Sleep(time.Duration(1) * time.Second)
+		port.Read(buf)
+		if strings.Contains(string(buf), "OK") {
+			ready = true
+			log.Println("串口通信正常")
+		}
+	}
+	ready = false
+	for !ready {
+		port.Write([]byte("AT+CPIN?\r\n"))
+		time.Sleep(time.Duration(1) * time.Second)
+		port.Read(buf)
+		if strings.Contains(string(buf), "READY") {
+			ready = true
+			log.Println("SIM卡状态正常")
+		}
+	}
 	wLock.Lock()
 	utils.Initlize(taskBus)
 	wLock.Unlock()
@@ -54,27 +74,26 @@ func initlizing() {
 func listenSms(config config.Config) {
 	buffer := make([]byte, BUFFER_SIZE)
 	for {
-		port.Read(buffer)
-		// todo handle buffer
-		msg := string(buffer[:])
-		if strings.Contains(msg, "+CMT:") {
+		//buffer = make([]byte, BUFFER_SIZE)
+		port.Read(buffer) // 不阻塞？
+		sms := string(buffer[:])
+		if strings.Contains(sms, "+CMT:") {
 			// 存储短信，Bark
-			// 发送成功 +CMGS: 157
 			log.Println("来短信了")
-			msgBodys := strings.Split(msg, ",")
-			fmt.Println(msgBodys)
-			// log.Println(utils.DecodeUcs2(strings.ReplaceAll(msgBodys[1], "\"", "")))
-			// log.Println()
-			// receiveTime := strings.ReplaceAll("20" + msgBodys[3] + " " + strings.Split(msgBodys[4], "\n")[0], "\"", "")
-			// body := utils.DecodeUcs2(strings.Split(msgBodys[4], "\n")[1])
-			// utils.Bark(receiveTime + "\n" + body, config)
-			// log.Println(utils.DecodeUcs2(b))
-			// log.Println(utils.EncodeUcs2("10685777605074"))
-			// log.Println(b)
-		} else {
-			// 放回结果队列
-			// log.Println(msg)
+			// todo 长短信聚合
+			bodys := strings.Split(sms, ",")
+			sender := utils.DecodeUcs2(strings.Split(bodys[0], "\"")[1])
+			receiveTime := "20" + strings.ReplaceAll(bodys[2], "\"", "")
+			t := strings.Split(bodys[3], "\r\n")
+			receiveTime += strings.ReplaceAll(" "+t[0], "\"", "")
+			receiveTime = strings.SplitN(receiveTime, "+", 2)[0]
+			body := utils.DecodeUcs2(t[1])
+			utils.Bark(sender, receiveTime+"\n"+body, config)
+			buffer = make([]byte, BUFFER_SIZE)
+		} else if len(strings.ReplaceAll(string(buffer), string(0), "")) > 0 {
+			// 放到队列
 			msgBus <- buffer[:]
+			buffer = make([]byte, BUFFER_SIZE)
 		}
 	}
 }
@@ -98,12 +117,14 @@ func execATCmd() {
 			bodys := strings.SplitN(string(cmd.ATCmd[:]), ":::", 2)
 			// 正式发送前的最后一条指令
 			tmpControl := string(bodys[0]) + utils.CMD_LF
+			resultBus <- utils.PhoneCmd{ATCmd: []byte(tmpControl)}
 			_, err := port.Write([]byte(tmpControl))
 			if err != nil {
 				log.Fatal(err)
 			}
 			// 发送消息内容和确认发送标志
 			time.Sleep(time.Duration(1) * time.Second)
+			resultBus <- utils.PhoneCmd{ATCmd: []byte(bodys[1])}
 			port.Write([]byte(bodys[1]))
 		} else {
 			_, err := port.Write(cmd.ATCmd)
@@ -120,23 +141,31 @@ func execATCmd() {
 // 处理AT命令执行结果，指令执行失败时发出通知
 func processATcmdResult(config config.Config) {
 	for {
-		msg := <-msgBus
+		message := <-msgBus
 		cmd := <-resultBus
-		body := string(msg)
+		body := string(message)
 		if strings.Contains(body, "ERROR") {
-			utils.Bark(string(cmd.ATCmd)+"执行失败", config)
+			utils.Bark("命令执行失败", string(cmd.ATCmd)+"执行失败", config)
 		} else if strings.Contains(body, "+CSQ") {
 			strength := strings.Split(body, " ")[1]
 			s := strings.Split(strength, "\n")[0]
 			signal := strings.Split(s, ",")[0]
 			log.Println("信号强度: -" + signal + "dBM")
+		} else if strings.Contains(body, ">") {
+			// 短信接收人
+			to = utils.DecodeUcs2(strings.Split(string(cmd.ATCmd), "\"")[1])
+		} else if strings.Contains(body, "+CMGS") {
+			if strings.Contains(body, "OK") {
+				log.Println("发给"+to+"的短信：",
+					utils.DecodeUcs2(strings.ReplaceAll(string(cmd.ATCmd), "\x1A", "")))
+				log.Println("发送成功")
+				utils.Bark("发给："+to, "短信发送成功", config)
+			} else {
+				utils.Bark("发给："+to, "短信发送失败", config)
+			}
 		} else {
-			log.Println(body)
+			log.Println(strings.ReplaceAll(string(cmd.ATCmd), "\r\n", ""), body)
 		}
-		// todo 判定短信是否发送成功
-		// todo 处理信号强度
-		// todo 处理运营商
-		// todo 处理IMEI
 	}
 }
 
@@ -155,7 +184,7 @@ func Run(config config.Config) {
 	go processATcmdResult(config)
 	go execATCmd()
 	go listenSms(config)
-	go heartBeat()
-	SendSmS("10086", "1")
+	//go heartBeat()
+	//SendSmS("10086", "1")
 	wg.Wait()
 }
