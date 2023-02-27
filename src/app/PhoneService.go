@@ -3,8 +3,7 @@ package app
 import (
 	"SmsBpi/config"
 	"SmsBpi/utils"
-	"github.com/jacobsa/go-serial/serial"
-	"io"
+	"go.bug.st/serial"
 	"log"
 	"strings"
 	"sync"
@@ -18,21 +17,18 @@ var resultBus chan utils.PhoneCmd = make(chan utils.PhoneCmd, 100)
 var msgBus chan []byte = make(chan []byte, 100)
 var to string // 短信收信人
 
-var port io.ReadWriteCloser = nil
+var port serial.Port = nil
 
 const BUFFER_SIZE = 1024 * 8
 
 func connDevice(config config.Config) {
-	options := serial.OpenOptions{
-		PortName:        config.Device,
-		BaudRate:        config.BaudRate,
-		DataBits:        8,
-		StopBits:        1,
-		MinimumReadSize: 4,
+	options := &serial.Mode{
+		BaudRate: 115200,
 	}
-	p, err := serial.Open(options)
+	p, err := serial.Open(config.Device, options)
+	p.SetReadTimeout(time.Duration(10) * time.Second)
 	if err != nil {
-		log.Println(err)
+		log.Fatal(err)
 	}
 	port = p
 }
@@ -74,12 +70,17 @@ func initlizing() {
 func listenSms(config config.Config) {
 	buffer := make([]byte, BUFFER_SIZE)
 	for {
+		wLock.Lock()
+		utils.ListenSms(taskBus)
+		wLock.Unlock()
+		time.Sleep(time.Duration(3) * time.Second)
 		//buffer = make([]byte, BUFFER_SIZE)
-		port.Read(buffer) // 不阻塞？
+		port.Read(buffer)
 		sms := string(buffer[:])
 		if strings.Contains(sms, "+CMT:") {
 			// 存储短信，Bark
 			log.Println("来短信了")
+			//log.Println(sms)
 			// todo 长短信聚合
 			bodys := strings.Split(sms, ",")
 			sender := utils.DecodeUcs2(strings.Split(bodys[0], "\"")[1])
@@ -91,7 +92,7 @@ func listenSms(config config.Config) {
 			utils.Bark(sender, receiveTime+"\n"+body, config)
 			buffer = make([]byte, BUFFER_SIZE)
 		} else if len(strings.ReplaceAll(string(buffer), string(0), "")) > 0 {
-			// 放到队列
+			//	// 放到队列
 			msgBus <- buffer[:]
 			buffer = make([]byte, BUFFER_SIZE)
 		}
@@ -139,7 +140,7 @@ func execATCmd() {
 }
 
 // 处理AT命令执行结果，指令执行失败时发出通知
-func processATcmdResult(config config.Config) {
+func processATCmdResult(config config.Config) {
 	for {
 		message := <-msgBus
 		cmd := <-resultBus
@@ -163,8 +164,10 @@ func processATcmdResult(config config.Config) {
 			} else {
 				utils.Bark("发给："+to, "短信发送失败", config)
 			}
+		} else if strings.Contains(body, "OK") {
+			// ignore
 		} else {
-			log.Println(strings.ReplaceAll(string(cmd.ATCmd), "\r\n", ""), body)
+			log.Println(cmd, body)
 		}
 	}
 }
@@ -181,10 +184,9 @@ func Run(config config.Config) {
 	connDevice(config)
 	defer close()
 	initlizing()
-	go processATcmdResult(config)
+	go processATCmdResult(config)
 	go execATCmd()
 	go listenSms(config)
 	//go heartBeat()
-	//SendSmS("10086", "1")
 	wg.Wait()
 }
