@@ -1,93 +1,192 @@
 package app
 
 import (
-	"SmsBpi/utils"
 	"SmsBpi/config"
-	"time"
-	"encoding/hex"
+	"SmsBpi/utils"
+	"go.bug.st/serial"
+	"log"
 	"strings"
 	"sync"
+	"time"
 )
 
 var wLock sync.Mutex
 
 var taskBus chan utils.PhoneCmd = make(chan utils.PhoneCmd, 100)
 var resultBus chan utils.PhoneCmd = make(chan utils.PhoneCmd, 100)
+var msgBus chan []byte = make(chan []byte, 100)
+var to string // 短信收信人
 
-func listenSms() {
-	// 每间隔5s，向总线发送一条检查未读短信的指令
+var port serial.Port = nil
+
+const BUFFER_SIZE = 1024 * 8
+
+func connDevice(config config.Config) {
+	options := &serial.Mode{
+		BaudRate: 115200,
+	}
+	p, err := serial.Open(config.Device, options)
+	p.SetReadTimeout(time.Duration(10) * time.Second)
+	if err != nil {
+		log.Fatal(err)
+	}
+	port = p
+}
+
+func close() {
+	if port != nil {
+		port.Close()
+	}
+}
+
+func initlizing() {
+	buf := make([]byte, BUFFER_SIZE)
+	// 检查SIM卡状态，正常后进行初始化
+	ready := false
+	for !ready {
+		port.Write([]byte("AT\r\n"))
+		time.Sleep(time.Duration(1) * time.Second)
+		port.Read(buf)
+		if strings.Contains(string(buf), "OK") {
+			ready = true
+			log.Println("串口通信正常")
+		}
+	}
+	ready = false
+	for !ready {
+		port.Write([]byte("AT+CPIN?\r\n"))
+		time.Sleep(time.Duration(1) * time.Second)
+		port.Read(buf)
+		if strings.Contains(string(buf), "READY") {
+			ready = true
+			log.Println("SIM卡状态正常")
+		}
+	}
+	wLock.Lock()
+	utils.Initlize(taskBus)
+	wLock.Unlock()
+}
+
+func listenSms(config config.Config) {
+	buffer := make([]byte, BUFFER_SIZE)
 	for {
 		wLock.Lock()
 		utils.ListenSms(taskBus)
 		wLock.Unlock()
-		time.Sleep(time.Duration(5) * time.Second)
-	}
-}
-
-func clearSms() {
-	// 每天清理一次已读短信
-	for {
-		wLock.Lock()
-		utils.CleanSms(taskBus)
-		wLock.Unlock()
-		time.Sleep(time.Duration(24) * time.Hour)
+		time.Sleep(time.Duration(3) * time.Second)
+		//buffer = make([]byte, BUFFER_SIZE)
+		port.Read(buffer)
+		sms := string(buffer[:])
+		if strings.Contains(sms, "+CMT:") {
+			// 存储短信，Bark
+			log.Println("来短信了")
+			//log.Println(sms)
+			// todo 长短信聚合
+			bodys := strings.Split(sms, ",")
+			sender := utils.DecodeUcs2(strings.Split(bodys[0], "\"")[1])
+			receiveTime := "20" + strings.ReplaceAll(bodys[2], "\"", "")
+			t := strings.Split(bodys[3], "\r\n")
+			receiveTime += strings.ReplaceAll(" "+t[0], "\"", "")
+			receiveTime = strings.SplitN(receiveTime, "+", 2)[0]
+			body := utils.DecodeUcs2(t[1])
+			utils.Bark(sender, receiveTime+"\n"+body, config)
+			buffer = make([]byte, BUFFER_SIZE)
+		} else if len(strings.ReplaceAll(string(buffer), string(0), "")) > 0 {
+			//	// 放到队列
+			msgBus <- buffer[:]
+			buffer = make([]byte, BUFFER_SIZE)
+		}
 	}
 }
 
 func heartBeat() {
 	// 每10s进行一次信号强度上报
+	for {
+		wLock.Lock()
+		utils.SignalStrength(taskBus)
+		wLock.Unlock()
+		time.Sleep(time.Duration(10) * time.Second)
+	}
 }
 
-// 处理AT命令执行结果
-func ProcessATcmdResult(result chan utils.PhoneCmd, config *config.Config, token *string) {
+// 执行AT命令
+func execATCmd() {
 	for {
-		phoneMsg := <-result
-		// 可以在这里对不同指令的处理结果
-		if strings.HasPrefix(string(phoneMsg.ATCmd), utils.CMD_CMGL_ALL) && strings.Contains(phoneMsg.Result, "OK") {
-			msgs := strings.Split(phoneMsg.Result, utils.CMD_LF_CR)
-			for i, m := range msgs {
-				if strings.HasPrefix(m, "+CMGL:") && strings.Contains(m, "UNREAD") {
-					tmp_info := strings.Split(msgs[i], ",\"")
-					src := strings.ReplaceAll(tmp_info[2], "\"", "")
-					src = strings.ReplaceAll(src, ",", "")
-					tmpsrc, _ := hex.DecodeString(src)
-					phonenum, _ := utils.Ucs2ToUtf8(string(tmpsrc))
-					t := strings.Replace(tmp_info[3], "\"", "", -1) //SIM900A 格式应改为：tmp_info[4]
-					if len(phoneMsg.SendMSG) != 0 {
-						phoneMsg.SendMSG += "\n"
-					}
-					phoneMsg.SendMSG += "来源: " + phonenum + " 时间: " + t + "\n"
-					if utils.IsUcs(msgs[i+1]) {
-						dat, _ := hex.DecodeString(msgs[i+1])
-						tmpmsg, _ := utils.Ucs2ToUtf8(string(dat))
-						phoneMsg.SendMSG += tmpmsg
-					} else {
-						phoneMsg.SendMSG += msgs[i+1]
-					}
-				}
+		cmd := <-taskBus
+		// 发送短信，由于是多个指令，需要特殊处理
+		if strings.HasPrefix(string(cmd.ATCmd[:]), utils.CMD_CMGS) {
+			bodys := strings.SplitN(string(cmd.ATCmd[:]), ":::", 2)
+			// 正式发送前的最后一条指令
+			tmpControl := string(bodys[0]) + utils.CMD_LF
+			resultBus <- utils.PhoneCmd{ATCmd: []byte(tmpControl)}
+			_, err := port.Write([]byte(tmpControl))
+			if err != nil {
+				log.Fatal(err)
+			}
+			// 发送消息内容和确认发送标志
+			time.Sleep(time.Duration(1) * time.Second)
+			resultBus <- utils.PhoneCmd{ATCmd: []byte(bodys[1])}
+			port.Write([]byte(bodys[1]))
+		} else {
+			_, err := port.Write(cmd.ATCmd)
+			if err != nil {
+				log.Fatal(err)
 			}
 		}
-		if strings.HasPrefix(string(phoneMsg.ATCmd), utils.CMD_ATD) {
-			if strings.Contains(phoneMsg.Result, "OK") {
-				phoneMsg.SendMSG = "拨打电话成功"
-			} else {
-				phoneMsg.SendMSG = "拨打电话失败"
-			}
-		}
+		resultBus <- cmd
+		// 每次执行一条指令后，等待给定时间
+		time.Sleep(time.Duration(cmd.Delay) * time.Second)
+	}
+}
 
-		if strings.HasPrefix(string(phoneMsg.ATCmd), utils.CMD_CMGS) {
-			if strings.Contains(phoneMsg.Result, "ERROR") {
-				phoneMsg.SendMSG = "发送短信失败"
+// 处理AT命令执行结果，指令执行失败时发出通知
+func processATCmdResult(config config.Config) {
+	for {
+		message := <-msgBus
+		cmd := <-resultBus
+		body := string(message)
+		if strings.Contains(body, "ERROR") {
+			utils.Bark("命令执行失败", string(cmd.ATCmd)+"执行失败", config)
+		} else if strings.Contains(body, "+CSQ") {
+			strength := strings.Split(body, " ")[1]
+			s := strings.Split(strength, "\n")[0]
+			signal := strings.Split(s, ",")[0]
+			log.Println("信号强度: -" + signal + "dBM")
+		} else if strings.Contains(body, ">") {
+			// 短信接收人
+			to = utils.DecodeUcs2(strings.Split(string(cmd.ATCmd), "\"")[1])
+		} else if strings.Contains(body, "+CMGS") {
+			if strings.Contains(body, "OK") {
+				log.Println("发给"+to+"的短信：",
+					utils.DecodeUcs2(strings.ReplaceAll(string(cmd.ATCmd), "\x1A", "")))
+				log.Println("发送成功")
+				utils.Bark("发给："+to, "短信发送成功", config)
 			} else {
-				phoneMsg.SendMSG = "发送短信成功"
+				utils.Bark("发给："+to, "短信发送失败", config)
 			}
+		} else if strings.Contains(body, "OK") {
+			// ignore
+		} else {
+			log.Println(cmd, body)
 		}
 	}
 }
 
+func SendSmS(phone string, msg string) {
+	wLock.Lock()
+	utils.SendSms(taskBus, phone, msg)
+	wLock.Unlock()
+}
+
 func Run(config config.Config) {
-	go listenSms()
-	go heartBeat()
-	go utils.ExecATCmd(taskBus, resultBus, &config)
-	// go processATcmdResult()
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	connDevice(config)
+	defer close()
+	initlizing()
+	go processATCmdResult(config)
+	go execATCmd()
+	go listenSms(config)
+	//go heartBeat()
+	wg.Wait()
 }

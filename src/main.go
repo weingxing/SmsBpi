@@ -1,18 +1,20 @@
 package main
 
 import (
+	"SmsBpi/app"
 	"SmsBpi/config"
-	"SmsBpi/utils"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os"
+	// "github.com/jacobsa/go-serial/serial"
+	// "strings"
 )
 
 func loadConfig(file string, cfg *config.Config) {
 	file_body, err := ioutil.ReadFile(file)
 	if err != nil {
-		panic(err)
+		os.Exit(-1)
 	}
 	json.Unmarshal(file_body, cfg)
 }
@@ -24,5 +26,5 @@ func main() {
 		return
 	}
 	loadConfig(os.Args[1], &cfg)
-	utils.Bark("HelloWorld", cfg)
+	app.Run(cfg)
 }
