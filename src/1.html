@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<head>
+    <title>test Ws mqtt.js</title>
+</head>
+<body>
+  <div>
+    Phone: <input id="phone" type="text" name="phone"><br>
+    Text: <input id="text" type="text" name="text"><br>
+    <button onclick="send()">提交</button>
+  </div>
+    <script src="https://cdn.staticfile.org/jquery/1.10.2/jquery.min.js"></script>
+    <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+    <script>
+        const client = mqtt.connect("ws://127.0.0.1:8083/mqtt")
+
+        function send() {
+          let data = {
+            "phone": $("#phone").val(),
+            "text": $("#text").val()
+          }
+          client.publish("bar/foo", JSON.stringify(data))
+        }
+       
+    </script>
+</body>
+</html>
