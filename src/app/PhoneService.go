@@ -70,19 +70,24 @@ func initlizing() {
 func listenSms(config config.Config) {
 	buffer := make([]byte, BUFFER_SIZE)
 	for {
-		wLock.Lock()
-		utils.ListenSms(taskBus)
-		wLock.Unlock()
-		time.Sleep(time.Duration(3) * time.Second)
+		// wLock.Lock()
+		// utils.ListenSms(taskBus)
+		// wLock.Unlock()
+		// time.Sleep(time.Duration(3) * time.Second)
 		//buffer = make([]byte, BUFFER_SIZE)
-		port.Read(buffer)
+		n := port.Read(buffer)
 		sms := string(buffer[:])
 		if strings.Contains(sms, "+CMT:") {
-			// 存储短信，Bark
+			// 存储短信&Bark
 			log.Println("来短信了")
-			//log.Println(sms)
-			// todo 长短信聚合
-			bodys := strings.Split(sms, ",")
+			// 等待数据传输完成
+			time.Sleep(time.Duration(1) * time.Second)
+			// 再次读取，取得全部数据
+			buf := make([]byte, BUFFER_SIZE)
+			size = port.read(buf)
+			// 拼接数据
+			buffer = append(buffer[:n], buf[:size])
+			bodys := strings.Split(string(buffer[:]), ",")
 			sender := utils.DecodeUcs2(strings.Split(bodys[0], "\"")[1])
 			receiveTime := "20" + strings.ReplaceAll(bodys[2], "\"", "")
 			t := strings.Split(bodys[3], "\r\n")
