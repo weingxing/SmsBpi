@@ -14,4 +14,6 @@ type Config struct {
 	SmtpPort     uint   `json:"smtpPort"`
 	SmtpUser     string `json:"smtpUser"`
 	SmtpPassword string `json:"smtpPassword"`
+	MqAddress    string `json:"mqAddress"`
+	Topic        string `json:"topic"`
 }

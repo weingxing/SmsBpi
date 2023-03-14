@@ -26,7 +26,6 @@ func connDevice(config config.Config) {
 		BaudRate: 115200,
 	}
 	p, err := serial.Open(config.Device, options)
-	p.SetReadTimeout(time.Duration(10) * time.Second)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -70,12 +69,7 @@ func initlizing() {
 func listenSms(config config.Config) {
 	buffer := make([]byte, BUFFER_SIZE)
 	for {
-		// wLock.Lock()
-		// utils.ListenSms(taskBus)
-		// wLock.Unlock()
-		// time.Sleep(time.Duration(3) * time.Second)
-		//buffer = make([]byte, BUFFER_SIZE)
-		n := port.Read(buffer)
+		n, _ := port.Read(buffer)
 		sms := string(buffer[:])
 		if strings.Contains(sms, "+CMT:") {
 			// 存储短信&Bark
@@ -84,9 +78,9 @@ func listenSms(config config.Config) {
 			time.Sleep(time.Duration(1) * time.Second)
 			// 再次读取，取得全部数据
 			buf := make([]byte, BUFFER_SIZE)
-			size = port.read(buf)
+			size, _ := port.Read(buf)
 			// 拼接数据
-			buffer = append(buffer[:n], buf[:size])
+			buffer = append(buffer[:n], buf[:size]...)
 			bodys := strings.Split(string(buffer[:]), ",")
 			sender := utils.DecodeUcs2(strings.Split(bodys[0], "\"")[1])
 			receiveTime := "20" + strings.ReplaceAll(bodys[2], "\"", "")
@@ -161,7 +155,7 @@ func processATCmdResult(config config.Config) {
 			// 短信接收人
 			to = utils.DecodeUcs2(strings.Split(string(cmd.ATCmd), "\"")[1])
 		} else if strings.Contains(body, "+CMGS") {
-			if strings.Contains(body, "OK") {
+			if !strings.Contains(body, "ERROR") {
 				log.Println("发给"+to+"的短信：",
 					utils.DecodeUcs2(strings.ReplaceAll(string(cmd.ATCmd), "\x1A", "")))
 				log.Println("发送成功")
@@ -192,6 +186,7 @@ func Run(config config.Config) {
 	go processATCmdResult(config)
 	go execATCmd()
 	go listenSms(config)
+	go ListenSend(config)
 	//go heartBeat()
 	wg.Wait()
 }

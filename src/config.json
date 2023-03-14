@@ -1,8 +1,8 @@
 {
-    "device": "COM4",
+    "device": "COM3",
     "baudRate": 115200,
-    "barkServer": "https://api.day.app",
-    "barkSecret": "cGqioDx5Yk44mLeu3qpxFP",
+    "barkServer": "https://bark.weingxing.cn",
+    "barkSecret": "8w6hp5KUcRNDhv88jk8Lx5",
     "wxCropId": "",
     "wxCorpSecret": "",
     "wxAgentId": 1000002,
@@ -11,5 +11,7 @@
     "smtpServer": "http://smtp.weingxing.cn",
     "smtpPort": 25,
     "smtpUser": "notify@weingxing.cn",
-    "smtpPassword": "abcdQWER2@1!"
+    "smtpPassword": "abcdQWER2@1!",
+    "mqAddress": "118.25.59.32:1883",
+    "topic": "bpi/sms"
 }

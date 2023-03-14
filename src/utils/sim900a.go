@@ -21,6 +21,7 @@ const (
 	CMD_GSN       string = "AT+CMD_GSN"             // 查询IMEI
 	CMD_CCID      string = "AT+CCID"                // 查询SIM卡CCID
 	CMD_CMGF      string = "AT+CMGF=1"              // 设置短信为文本模式
+	CMD_CMGF0     string = "AT+CMGF=0"              // 设置短信为PDU模式
 	CMD_CSCS_UCS2 string = "AT+CSCS=\"UCS2\""       // 设置编码（中文短信）
 	CMD_CSCS_GSM  string = "AT+CSCS=\"GSM\""        // 设置编码（英文短信）
 	CMD_CSMP      string = "AT+CSMP=17,167,0,8"     // 文本模式
