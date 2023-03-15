@@ -35,6 +35,8 @@ func listenSend(config config.Config) {
 		Network:  "tcp",
 		Address:  config.MqAddress,
 		ClientID: []byte("SmsBpi"),
+		UserName: []byte(config.MqUser),
+		Password: []byte(config.MqPassword),
 	})
 	if err != nil {
 		log.Fatal("connection err: ", err)

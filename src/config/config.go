@@ -15,5 +15,7 @@ type Config struct {
 	SmtpUser     string `json:"smtpUser"`
 	SmtpPassword string `json:"smtpPassword"`
 	MqAddress    string `json:"mqAddress"`
+	MqUser       string `json:"mqUser"`
+	MqPassword   string `json:"mqPassword"`
 	Topic        string `json:"topic"`
 }

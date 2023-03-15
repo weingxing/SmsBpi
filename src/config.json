@@ -13,5 +13,7 @@
     "smtpUser": "notify@weingxing.cn",
     "smtpPassword": "abcdQWER2@1!",
     "mqAddress": "118.25.59.32:1883",
+    "mqUser": "asdasd",
+    "mqPassword": "asdsa",
     "topic": "bpi/sms"
 }
