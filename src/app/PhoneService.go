@@ -66,21 +66,21 @@ func initlizing() {
 	wLock.Unlock()
 }
 
-func listenSms(config config.Config) {
+func readPort(config config.Config) {
 	buffer := make([]byte, BUFFER_SIZE)
 	for {
 		n, _ := port.Read(buffer)
-		sms := string(buffer[:])
-		if strings.Contains(sms, "+CMT:") {
+		// 等待数据传输完成
+		time.Sleep(time.Duration(500) * time.Millisecond)
+		// 再次读取，取得全部数据
+		buf := make([]byte, BUFFER_SIZE)
+		size, _ := port.Read(buf)
+		// 拼接数据
+		buffer = append(buffer[:n], buf[:size]...)
+		data := string(buffer[:])
+		if strings.Contains(data, "+CMT:") {
 			// 存储短信&Bark
 			log.Println("来短信了")
-			// 等待数据传输完成
-			time.Sleep(time.Duration(1) * time.Second)
-			// 再次读取，取得全部数据
-			buf := make([]byte, BUFFER_SIZE)
-			size, _ := port.Read(buf)
-			// 拼接数据
-			buffer = append(buffer[:n], buf[:size]...)
 			bodys := strings.Split(string(buffer[:]), ",")
 			sender := utils.DecodeUcs2(strings.Split(bodys[0], "\"")[1])
 			receiveTime := "20" + strings.ReplaceAll(bodys[2], "\"", "")
@@ -90,8 +90,8 @@ func listenSms(config config.Config) {
 			body := utils.DecodeUcs2(t[1])
 			utils.Bark(sender, receiveTime+"\n"+body, config)
 			buffer = make([]byte, BUFFER_SIZE)
-		} else if len(strings.ReplaceAll(string(buffer), string(0), "")) > 0 {
-			//	// 放到队列
+		} else if len(strings.ReplaceAll(string(buffer), string(rune(0)), "")) > 0 {
+			// 放到队列
 			msgBus <- buffer[:]
 			buffer = make([]byte, BUFFER_SIZE)
 		}
@@ -155,9 +155,7 @@ func processATCmdResult(config config.Config) {
 			// 短信接收人
 			to = utils.DecodeUcs2(strings.Split(string(cmd.ATCmd), "\"")[1])
 		} else if strings.Contains(body, "+CMGS") {
-			if !strings.Contains(body, "ERROR") {
-				log.Println("发给"+to+"的短信：",
-					utils.DecodeUcs2(strings.ReplaceAll(string(cmd.ATCmd), "\x1A", "")))
+			if strings.Contains(body, "OK") {
 				log.Println("发送成功")
 				utils.Bark("发给："+to, "短信发送成功", config)
 			} else {
@@ -165,8 +163,9 @@ func processATCmdResult(config config.Config) {
 			}
 		} else if strings.Contains(body, "OK") {
 			// ignore
+			//log.Println(string(cmd.ATCmd), "----", body)
 		} else {
-			log.Println(cmd, body)
+			//log.Println(string(cmd.ATCmd), body)
 		}
 	}
 }
@@ -185,8 +184,8 @@ func Run(config config.Config) {
 	initlizing()
 	go processATCmdResult(config)
 	go execATCmd()
-	go listenSms(config)
-	go ListenSend(config)
+	go readPort(config)
+	go listenSend(config)
 	//go heartBeat()
 	wg.Wait()
 }

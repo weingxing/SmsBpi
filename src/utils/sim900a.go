@@ -115,7 +115,7 @@ func Initlize(taskBus chan PhoneCmd) {
 	ate0 := []byte(CMD_ATE0 + CMD_LF_CR)
 	ateCmd := PhoneCmd{Delay: 1}
 	ateCmd.ATCmd = ate0
-	taskBus <- ateCmd // 关闭回显
+	//taskBus <- ateCmd // 关闭回显
 	gprsOff := []byte(CMD_CGATT_OFF + CMD_LF_CR)
 	gprsOffCmd := PhoneCmd{Delay: 1}
 	gprsOffCmd.ATCmd = gprsOff
